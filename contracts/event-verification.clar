@@ -1,30 +1,96 @@
+;; Event Verification Contract
+;; Validates legitimate sporting events
 
-;; title: event-verification
-;; version:
-;; summary:
-;; description:
+(define-data-var last-event-id uint u0)
 
-;; traits
-;;
+;; Event data structure
+(define-map events
+  { event-id: uint }
+  {
+    name: (string-ascii 100),
+    venue: (string-ascii 100),
+    date: uint,
+    organizer: principal,
+    verified: bool
+  }
+)
 
-;; token definitions
-;;
+;; Event organizers
+(define-map event-organizers
+  { organizer: principal }
+  { authorized: bool }
+)
 
-;; constants
-;;
+;; Initialize contract owner
+(define-constant contract-owner tx-sender)
 
-;; data vars
-;;
+;; Error codes
+(define-constant err-not-authorized u100)
+(define-constant err-event-not-found u101)
+(define-constant err-already-verified u102)
 
-;; data maps
-;;
+;; Check if caller is contract owner
+(define-private (is-contract-owner)
+  (is-eq tx-sender contract-owner)
+)
 
-;; public functions
-;;
+;; Add an event organizer
+(define-public (add-event-organizer (organizer principal))
+  (begin
+    (asserts! (is-contract-owner) (err u1))
+    (ok (map-set event-organizers { organizer: organizer } { authorized: true }))
+  )
+)
 
-;; read only functions
-;;
+;; Check if caller is authorized organizer
+(define-private (is-authorized-organizer)
+  (default-to false (get authorized (map-get? event-organizers { organizer: tx-sender })))
+)
 
-;; private functions
-;;
+;; Register a new sporting event
+(define-public (register-event (name (string-ascii 100)) (venue (string-ascii 100)) (date uint))
+  (let
+    (
+      (new-id (+ (var-get last-event-id) u1))
+    )
+    (asserts! (or (is-contract-owner) (is-authorized-organizer)) (err err-not-authorized))
+    (map-set events
+      { event-id: new-id }
+      {
+        name: name,
+        venue: venue,
+        date: date,
+        organizer: tx-sender,
+        verified: false
+      }
+    )
+    (var-set last-event-id new-id)
+    (ok new-id)
+  )
+)
 
+;; Verify an event
+(define-public (verify-event (event-id uint))
+  (let
+    (
+      (event (map-get? events { event-id: event-id }))
+    )
+    (asserts! (is-contract-owner) (err err-not-authorized))
+    (asserts! (is-some event) (err err-event-not-found))
+    (asserts! (not (get verified (unwrap-panic event))) (err err-already-verified))
+    (ok (map-set events
+      { event-id: event-id }
+      (merge (unwrap-panic event) { verified: true })
+    ))
+  )
+)
+
+;; Check if an event is verified
+(define-read-only (is-event-verified (event-id uint))
+  (default-to false (get verified (map-get? events { event-id: event-id })))
+)
+
+;; Get event details
+(define-read-only (get-event (event-id uint))
+  (map-get? events { event-id: event-id })
+)
